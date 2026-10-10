@@ -415,19 +415,21 @@ app.post("/api/vision/analyze", upload.single("image"), async (req, res) => {
 
     const dataUrl = `data:${req.file.mimetype};base64,${req.file.buffer.toString("base64")}`;
     const prompt = `
-Analyze this grocery/pantry image. Identify all clearly visible food ingredients and grocery products.
-Exclude people, furniture, plates, bags, shelves, packaging material, and other non-food objects.
-Return ONLY JSON in this shape:
-{"items":[{"name":"Tomato","quantity":1,"unit":"kg","category":"Vegetables"}]}
+You are a careful grocery and pantry OCR assistant. Inspect the image closely for food products AND printed expiry/best-before/use-by dates on their packages.
+Return ONLY valid JSON in this shape:
+{"items":[{"name":"Milk","quantity":1,"unit":"pack","category":"Dairy","expiryDate":"2026-10-15","expiryDateConfidence":"high","expiryDateText":"EXP 15/10/2026"}]}
 Rules:
-- Identify multiple distinct visible food items.
-- Use common grocery names.
-- Estimate quantity only if reasonably visible; otherwise use 1.
-- Units: kg, g, litre, ml, pcs, pack, loaf.
+- Identify each clearly visible food item; never invent products or dates.
+- Read expiry dates only when printed date is legible and clearly associated with that product.
+- Convert clearly read dates to YYYY-MM-DD. Interpret DD/MM/YYYY, DD-MM-YYYY, and month-name formats carefully.
+- Distinguish EXP/expiry/use-by/best-before from manufacture/packed-on dates. Never use a manufacture date as expiry.
+- If missing, unclear, obscured, or ambiguous, set expiryDate to null and expiryDateConfidence to "low". Set expiryDateText to the exact readable date text if any, otherwise null. Do not guess a year or silently correct a date.
+- If date order or year is ambiguous, expiryDate must be null; preserve printed text in expiryDateText.
+- Use quantity 1 when quantity cannot reasonably be estimated. Units: kg, g, litre, ml, pcs, pack, loaf.
 - Categories: Vegetables, Fruits, Dairy, Grains, Bakery, Protein, Beverages, Snacks, Other.
-- Never invent items not visible.
-- Do not guess expiry dates. This scanner response contains only name, quantity, unit, and category.
-`;
+- Loose fresh produce without packaging/date labels must have expiryDate null.
+- Include name, quantity, unit, category, expiryDate, expiryDateConfidence, and expiryDateText for every item.
+`
 
     const apiResponse = await fetch("https://api.groq.com/openai/v1/chat/completions", {
       method: "POST",
