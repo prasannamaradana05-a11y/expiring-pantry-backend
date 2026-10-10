@@ -473,7 +473,10 @@ Rules:
         name: item.name.trim(),
         quantity: Number.isFinite(Number(item.quantity)) && Number(item.quantity) > 0 ? Number(item.quantity) : 1,
         unit: typeof item.unit === "string" && item.unit.trim() ? item.unit.trim() : "pcs",
-        category: typeof item.category === "string" && item.category.trim() ? item.category.trim() : "Other"
+        category: typeof item.category === "string" && item.category.trim() ? item.category.trim() : "Other",
+        expiryDate: typeof item.expiryDate === "string" && /^\\d{4}-\\d{2}-\\d{2}$/.test(item.expiryDate) ? item.expiryDate : null,
+        expiryDateConfidence: ["high", "medium", "low"].includes(item.expiryDateConfidence) ? item.expiryDateConfidence : "low",
+        expiryDateText: typeof item.expiryDateText === "string" ? item.expiryDateText : null
       }));
     return res.json(result);
   } catch (error) {
