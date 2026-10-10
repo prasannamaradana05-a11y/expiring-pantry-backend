@@ -3,7 +3,7 @@ import cors from "cors";
 import dotenv from "dotenv";
 import mongoose from "mongoose";
 import multer from "multer";
-// OpenAI Vision is called through the built-in fetch API.
+// Groq Vision is called through the built-in fetch API.
 
 dotenv.config();
 const upload = multer({
@@ -393,18 +393,24 @@ app.get("/api/recipes/smart/:userId", async (req, res) => {
   }
 });
 // =========================
-// OPENAI VISION AI
+// GROQ VISION AI
 // =========================
 app.post("/api/vision/analyze", upload.single("image"), async (req, res) => {
   try {
-    if (!req.file) return res.status(400).json({ message: "No image uploaded" });
-    if (!process.env.OPENAI_API_KEY) {
-      return res.status(503).json({ message: "Vision AI is not configured. Add OPENAI_API_KEY to backend environment variables." });
+    if (!req.file) {
+      return res.status(400).json({ message: "No image uploaded" });
+    }
+    if (!process.env.GROQ_API_KEY) {
+      return res.status(503).json({
+        message: "Vision AI is not configured. Add GROQ_API_KEY to backend environment variables."
+      });
     }
 
     const allowedTypes = ["image/jpeg", "image/png", "image/webp", "image/gif"];
     if (!allowedTypes.includes(req.file.mimetype)) {
-      return res.status(400).json({ message: "Unsupported image type. Upload a JPG, PNG, WEBP, or GIF image." });
+      return res.status(400).json({
+        message: "Unsupported image type. Upload a JPG, PNG, WEBP, or GIF image."
+      });
     }
 
     const dataUrl = `data:${req.file.mimetype};base64,${req.file.buffer.toString("base64")}`;
@@ -423,19 +429,19 @@ Rules:
 - Do not guess expiry dates. This scanner response contains only name, quantity, unit, and category.
 `;
 
-    const apiResponse = await fetch("https://api.openai.com/v1/chat/completions", {
+    const apiResponse = await fetch("https://api.groq.com/openai/v1/chat/completions", {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+        Authorization: `Bearer ${process.env.GROQ_API_KEY}`,
         "Content-Type": "application/json"
       },
       body: JSON.stringify({
-        model: process.env.OPENAI_VISION_MODEL || "gpt-4o-mini",
+        model: process.env.GROQ_VISION_MODEL || "qwen/qwen3.6-27b",
         messages: [{
           role: "user",
           content: [
             { type: "text", text: prompt },
-            { type: "image_url", image_url: { url: dataUrl, detail: "high" } }
+            { type: "image_url", image_url: { url: dataUrl } }
           ]
         }],
         response_format: { type: "json_object" },
@@ -445,17 +451,19 @@ Rules:
 
     const body = await apiResponse.json();
     if (!apiResponse.ok) {
-      console.error("OpenAI Vision API error:", apiResponse.status, body);
+      console.error("Groq Vision API error:", apiResponse.status, body);
       return res.status(apiResponse.status === 429 ? 429 : 502).json({
         message: "Vision AI analysis failed",
-        error: body?.error?.message || "OpenAI Vision request failed"
+        error: body?.error?.message || "Groq Vision request failed"
       });
     }
 
     const content = body?.choices?.[0]?.message?.content;
-    if (!content) throw new Error("OpenAI Vision returned an empty response");
+    if (!content) throw new Error("Groq Vision returned an empty response");
     const result = JSON.parse(content);
-    if (!result || !Array.isArray(result.items)) throw new Error('Response must contain an "items" array');
+    if (!result || !Array.isArray(result.items)) {
+      throw new Error('Response must contain an "items" array');
+    }
 
     result.items = result.items
       .filter(item => item && typeof item.name === "string" && item.name.trim())
@@ -467,7 +475,7 @@ Rules:
       }));
     return res.json(result);
   } catch (error) {
-    console.error("Vision AI error:", error);
+    console.error("Groq Vision error:", error);
     return res.status(500).json({ message: "Vision AI analysis failed", error: error.message });
   }
 });
