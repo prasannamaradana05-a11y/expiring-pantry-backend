@@ -3,13 +3,9 @@ import cors from "cors";
 import dotenv from "dotenv";
 import mongoose from "mongoose";
 import multer from "multer";
-import { GoogleGenAI } from "@google/genai";
+// OpenAI Vision is called through the built-in fetch API.
 
 dotenv.config();
-const ai = new GoogleGenAI({
-  apiKey: process.env.GEMINI_API_KEY
-});
-
 const upload = multer({
   storage: multer.memoryStorage()
 });
@@ -397,135 +393,85 @@ app.get("/api/recipes/smart/:userId", async (req, res) => {
   }
 });
 // =========================
-// GEMINI VISION AI
+// OPENAI VISION AI
 // =========================
-
 app.post("/api/vision/analyze", upload.single("image"), async (req, res) => {
   try {
-    if (!req.file) {
-      return res.status(400).json({
-        message: "No image uploaded"
+    if (!req.file) return res.status(400).json({ message: "No image uploaded" });
+    if (!process.env.OPENAI_API_KEY) {
+      return res.status(503).json({ message: "Vision AI is not configured. Add OPENAI_API_KEY to backend environment variables." });
+    }
+
+    const allowedTypes = ["image/jpeg", "image/png", "image/webp", "image/gif"];
+    if (!allowedTypes.includes(req.file.mimetype)) {
+      return res.status(400).json({ message: "Unsupported image type. Upload a JPG, PNG, WEBP, or GIF image." });
+    }
+
+    const dataUrl = `data:${req.file.mimetype};base64,${req.file.buffer.toString("base64")}`;
+    const prompt = `
+Analyze this grocery/pantry image. Identify all clearly visible food ingredients and grocery products.
+Exclude people, furniture, plates, bags, shelves, packaging material, and other non-food objects.
+Return ONLY JSON in this shape:
+{"items":[{"name":"Tomato","quantity":1,"unit":"kg","category":"Vegetables"}]}
+Rules:
+- Identify multiple distinct visible food items.
+- Use common grocery names.
+- Estimate quantity only if reasonably visible; otherwise use 1.
+- Units: kg, g, litre, ml, pcs, pack, loaf.
+- Categories: Vegetables, Fruits, Dairy, Grains, Bakery, Protein, Beverages, Snacks, Other.
+- Never invent items not visible.
+- Do not guess expiry dates. This scanner response contains only name, quantity, unit, and category.
+`;
+
+    const apiResponse = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        model: process.env.OPENAI_VISION_MODEL || "gpt-4o-mini",
+        messages: [{
+          role: "user",
+          content: [
+            { type: "text", text: prompt },
+            { type: "image_url", image_url: { url: dataUrl, detail: "high" } }
+          ]
+        }],
+        response_format: { type: "json_object" },
+        max_tokens: 1200
+      })
+    });
+
+    const body = await apiResponse.json();
+    if (!apiResponse.ok) {
+      console.error("OpenAI Vision API error:", apiResponse.status, body);
+      return res.status(apiResponse.status === 429 ? 429 : 502).json({
+        message: "Vision AI analysis failed",
+        error: body?.error?.message || "OpenAI Vision request failed"
       });
     }
 
-    const base64Image = req.file.buffer.toString("base64");
+    const content = body?.choices?.[0]?.message?.content;
+    if (!content) throw new Error("OpenAI Vision returned an empty response");
+    const result = JSON.parse(content);
+    if (!result || !Array.isArray(result.items)) throw new Error('Response must contain an "items" array');
 
-    const prompt = `
-Analyze this grocery/pantry image.
-
-Identify all clearly visible food ingredients or grocery items.
-
-Do not identify people, furniture, plates, bags, shelves,
-packaging material, or other non-food objects.
-
-Return ONLY valid JSON in this exact format:
-
-{
-  "items": [
-    {
-      "name": "Tomato",
-      "quantity": 1,
-      "unit": "kg",
-      "category": "Vegetables"
-    }
-  ]
-}
-
-Rules:
-- Detect multiple different food items if visible.
-- Use common grocery names.
-- Estimate quantity only when reasonably visible; otherwise use 1.
-- Use suitable units: kg, g, litre, ml, pcs, pack, loaf.
-- Categories:
-  Vegetables, Fruits, Dairy, Grains, Bakery,
-  Protein, Beverages, Snacks, Other.
-- Do not invent items that are not visible.
-- Return JSON only.
-`;
-
-    // Try Gemini up to 3 times if the service is temporarily unavailable
-    let response;
-    let lastError;
-
-    for (let attempt = 1; attempt <= 3; attempt++) {
-      try {
-        console.log(`Gemini attempt ${attempt}/3...`);
-
-        response = await ai.models.generateContent({
-          model: "gemini-3.8-flash",
-          contents: [
-            {
-              role: "user",
-              parts: [
-                {
-                  inlineData: {
-                    mimeType: req.file.mimetype,
-                    data: base64Image
-                  }
-                },
-                {
-                  text: prompt
-                }
-              ]
-            }
-          ]
-        });
-
-        break;
-
-      } catch (error) {
-        lastError = error;
-
-        if (error.status === 503 && attempt < 3) {
-          console.log(
-            "Gemini temporarily unavailable. Retrying in 3 seconds..."
-          );
-
-          await new Promise(resolve => setTimeout(resolve, 3000));
-        } else {
-          throw error;
-        }
-      }
-    }
-
-    if (!response) {
-      throw lastError || new Error("Gemini did not return a response");
-    }
-
-    const text = response.text?.trim();
-
-    console.log("Gemini response:", text);
-
-    if (!text) {
-      throw new Error("Gemini returned an empty response");
-    }
-
-    // Remove markdown code fences if Gemini adds them
-    const cleaned = text
-      .replace(/```json/gi, "")
-      .replace(/```/g, "")
-      .trim();
-
-    // Extract JSON object if Gemini adds extra text
-    const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
-
-    if (!jsonMatch) {
-      throw new Error("Gemini did not return valid JSON");
-    }
-
-    const result = JSON.parse(jsonMatch[0]);
-
-    res.json(result);
-
+    result.items = result.items
+      .filter(item => item && typeof item.name === "string" && item.name.trim())
+      .map(item => ({
+        name: item.name.trim(),
+        quantity: Number.isFinite(Number(item.quantity)) && Number(item.quantity) > 0 ? Number(item.quantity) : 1,
+        unit: typeof item.unit === "string" && item.unit.trim() ? item.unit.trim() : "pcs",
+        category: typeof item.category === "string" && item.category.trim() ? item.category.trim() : "Other"
+      }));
+    return res.json(result);
   } catch (error) {
     console.error("Vision AI error:", error);
-
-    res.status(500).json({
-      message: "Vision AI analysis failed",
-      error: error.message
-    });
+    return res.status(500).json({ message: "Vision AI analysis failed", error: error.message });
   }
 });
+
 // ==================== USE / CONSUME PANTRY ITEM ====================
 
 app.put("/api/pantry/:id/use", async (req, res) => {
