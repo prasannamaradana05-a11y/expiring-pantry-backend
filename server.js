@@ -421,10 +421,13 @@ Return ONLY valid JSON in this shape:
 Rules:
 - Identify each clearly visible food item; never invent products or dates.
 - Read expiry dates only when printed date is legible and clearly associated with that product.
-- Convert clearly read dates to YYYY-MM-DD. Interpret DD/MM/YYYY, DD-MM-YYYY, and month-name formats carefully.
-- Distinguish EXP/expiry/use-by/best-before from manufacture/packed-on dates. Never use a manufacture date as expiry.
-- If missing, unclear, obscured, or ambiguous, set expiryDate to null and expiryDateConfidence to "low". Set expiryDateText to the exact readable date text if any, otherwise null. Do not guess a year or silently correct a date.
-- If date order or year is ambiguous, expiryDate must be null; preserve printed text in expiryDateText.
+- Read the full package carefully, especially text immediately after EXP, EXPIRY, USE BY, BEST BEFORE, or BB.
+- Convert clearly read expiry dates to YYYY-MM-DD. Interpret numeric dates on Indian grocery packaging as DD/MM/YY or DD/MM/YYYY unless the printed format clearly says otherwise.
+- For a clearly printed two-digit year on an explicitly labelled expiry date (for example, "EXPIRY: 09/09/26"), interpret 26 as 2026 and return "2026-09-09". Do not reject a date only because the year has two digits.
+- Distinguish EXP/expiry/use-by/best-before from manufacture/MFG/packed-on dates. Never use a manufacture date as expiry when an expiry label is visible.
+- If multiple dates are visible, choose the date explicitly labelled EXP/EXPIRY/USE BY/BEST BEFORE, not a nearby MFG/PKD date. Preserve the exact relevant label and date in expiryDateText.
+- If the expiry date is genuinely missing, obscured, or unreadable, set expiryDate to null and expiryDateConfidence to "low". Do not invent digits.
+- If there is no clear label and the date meaning cannot be determined, set expiryDate to null rather than guessing.
 - Use quantity 1 when quantity cannot reasonably be estimated. Units: kg, g, litre, ml, pcs, pack, loaf.
 - Categories: Vegetables, Fruits, Dairy, Grains, Bakery, Protein, Beverages, Snacks, Other.
 - Loose fresh produce without packaging/date labels must have expiryDate null.
